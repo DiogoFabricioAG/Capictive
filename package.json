@@ -1,0 +1,21 @@
+{
+  "name": "capictive",
+  "version": "1.0.0",
+  "description": "Bienvenido a Capictive: un proyecto para construir un agente de inteligencia artificial orientado a apoyar procesos electorales (presidenciales y gubernamentales) y al mismo tiempo ofrecer seguimiento continuo del gobierno en funciones. Este README describe la visión, funcionalidades, arquitectura sugerida, consideraciones éticas y los próximos pasos recomendados.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.1",
+    "node-telegram-bot-api": "^0.61.0",
+    "node-fetch": "^2.6.7",
+    "dotenv": "^16.0.3"
+  }
+}
