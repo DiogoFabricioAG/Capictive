@@ -12,6 +12,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 const fetch = require('node-fetch');
+const { formatBrainResponse, formatBrainResponseMarkdownV2 } = require('../utils/formatResponse');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8285082617:AAGZX6-8sVz6UyLXo2V8aWwjQXGkBYkBoIw';
 
@@ -87,13 +88,14 @@ async function handleTextMessage(chatId, text, msg) {
       });
     }, 4000);
 
-    const reply = await generateResponse(text, { chatId, msg });
+  const rawReply = await generateResponse(text, { chatId, msg });
+  const reply = formatBrainResponse(rawReply);
 
-    // Limpiar indicador de typing
-    if (typingInterval) clearInterval(typingInterval);
+  // Limpiar indicador de typing
+  if (typingInterval) clearInterval(typingInterval);
 
-    // Enviar la respuesta tal cual la devuelve el brain
-    await bot.sendMessage(chatId, reply);
+  // Enviar la respuesta formateada en texto plano (sin parse_mode)
+  await bot.sendMessage(chatId, reply);
     return;
   } catch (err) {
     if (typingInterval) clearInterval(typingInterval);
