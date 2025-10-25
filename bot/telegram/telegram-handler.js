@@ -69,32 +69,38 @@ bot.on('message', async (msg) => {
 });
 
 async function handleTextMessage(chatId, text, msg) {
-  const t = (text || '').toLowerCase();
+  // Enviamos continuamente la acción de escritura mientras esperamos la respuesta del brain.
+  let typingInterval = null;
+  try {
+    // un primer intento inmediato
+    try {
+      await bot.sendChatAction(chatId, 'typing');
+    } catch (err) {
+      console.debug('sendChatAction no soportado o falló en primer intento:', err && err.message);
+    }
 
-  // Intents simples
-  if (t.includes('podcast')) {
-    await bot.sendMessage(chatId, '📻 Aquí tienes los últimos podcasts disponibles:\n1) Episodio 01 — Introducción\n2) Episodio 02 — Plan de Gobierno\n(esto es un placeholder; integra el CMS o feed RSS para datos reales).');
+    // Mantener el 'typing' cada 4 segundos para que el usuario vea que está respondiendo
+    typingInterval = setInterval(() => {
+      bot.sendChatAction(chatId, 'typing').catch((err) => {
+        // no hacemos mucho aquí, solo logueamos
+        console.debug('sendChatAction interval failed:', err && err.message);
+      });
+    }, 4000);
+
+    const reply = await generateResponse(text, { chatId, msg });
+
+    // Limpiar indicador de typing
+    if (typingInterval) clearInterval(typingInterval);
+
+    // Enviar la respuesta tal cual la devuelve el brain
+    await bot.sendMessage(chatId, reply);
+    return;
+  } catch (err) {
+    if (typingInterval) clearInterval(typingInterval);
+    console.error('Error en handleTextMessage:', err);
+    await bot.sendMessage(chatId, '❌ Ocurrió un error procesando tu mensaje. Intenta de nuevo más tarde.');
     return;
   }
-
-  if (t.includes('video')) {
-    await bot.sendMessage(chatId, '🎬 Puedes ver nuestros videos en: https://x.com/capictive (placeholder). ¿Quieres recibir el último clip? Escribe "último video".');
-    return;
-  }
-
-  if (t.includes('plan') || t.includes('gobierno')) {
-    await bot.sendMessage(chatId, '🗂️ Estado del Plan de Gobierno:\n- Meta A: En progreso (45%)\n- Meta B: Completada\nPara más detalles, pide "detalle meta A" o visita la web. (placeholder)');
-    return;
-  }
-
-  if (t.includes('ayuda') || t.includes('help')) {
-    await bot.sendMessage(chatId, 'Comandos útiles:\n- podcast\n- video\n- plan\nTambién puedes preguntar libremente y trataré de responder basándome en las fuentes disponibles.');
-    return;
-  }
-
-  // Fallback: llamar a LLM/RAG (placeholder)
-  const reply = await generateResponse(text, { chatId, msg });
-  await bot.sendMessage(chatId, reply);
 }
 
 async function handleVoiceMessage(chatId, voice, msg) {
@@ -116,16 +122,47 @@ async function handleVoiceMessage(chatId, voice, msg) {
   }
 }
 
-// Placeholder para la integración con RAG / LLM
+// Integración con Capictive Brain (HTTP POST)
 async function generateResponse(userText, context) {
-  // Aquí se debe llamar al servicio RAG/LLM.
-  // Ejemplo pseudo-implementación:
-  // 1) buscar en vector DB con embeddings
-  // 2) pasar contexto y documentos al LLM
-  // 3) devolver respuesta con referencias
+  const endpoint = process.env.CAPITIVE_BRAIN_URL || 'https://capictive-brain.diogofabricio17.workers.dev';
+  const timeoutMs = process.env.CAPITIVE_BRAIN_TIMEOUT_MS ? Number.parseInt(process.env.CAPITIVE_BRAIN_TIMEOUT_MS, 10) : 30000;
 
-  // Por ahora, devolvemos una respuesta simulada
-  return `Respuesta automática: he recibido tu mensaje "${userText}". (Este es un placeholder. Integra RAG/LLM para respuestas basadas en documentos.)`;
+  const payload = { query: userText };
+
+  try {
+    const fetchPromise = fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    // Timeout wrapper
+    const res = await Promise.race([
+      fetchPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+    ]);
+
+    if (!res?.ok) {
+      let bodyText = '';
+      try {
+        bodyText = await (res?.text?.() ?? '');
+      } catch (err) {
+        console.debug('Error leyendo cuerpo de respuesta errónea:', err?.message);
+      }
+      const statusPart = res ? `${res.status} ${res.statusText}` : 'sin respuesta';
+      return `⚠️ Error consultando Capictive Brain: ${statusPart}. ${bodyText}`;
+    }
+
+    const text = await res.text();
+    // El endpoint devuelve texto raw, lo retornamos tal cual
+    return text && text.length > 0 ? text : 'Capictive Brain devolvió una respuesta vacía.';
+  } catch (err) {
+    if (err && err.message === 'timeout') {
+      return '⏱️ La consulta tardó demasiado. Intenta de nuevo en un momento.';
+    }
+    console.error('generateResponse error:', err);
+    return '❌ Error interno al consultar Capictive Brain. Intenta de nuevo más tarde.';
+  }
 }
 
 // Manejo de errores globales
