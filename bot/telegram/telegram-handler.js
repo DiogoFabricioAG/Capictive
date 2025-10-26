@@ -43,7 +43,7 @@ bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
 
     // Ignorar mensajes que son solo el comando /start (ya manejado)
-    if (msg.text && msg.text.startsWith('/start')) return;
+    if (msg.text?.startsWith('/start')) return;
 
     if (msg.text) {
       await handleTextMessage(chatId, msg.text, msg);
@@ -77,25 +77,53 @@ async function handleTextMessage(chatId, text, msg) {
     try {
       await bot.sendChatAction(chatId, 'typing');
     } catch (err) {
-      console.debug('sendChatAction no soportado o falló en primer intento:', err && err.message);
+      console.debug('sendChatAction no soportado o falló en primer intento:', err?.message);
     }
 
     // Mantener el 'typing' cada 4 segundos para que el usuario vea que está respondiendo
     typingInterval = setInterval(() => {
       bot.sendChatAction(chatId, 'typing').catch((err) => {
         // no hacemos mucho aquí, solo logueamos
-        console.debug('sendChatAction interval failed:', err && err.message);
+        console.debug('sendChatAction interval failed:', err?.message);
       });
     }, 4000);
 
-  const rawReply = await generateResponse(text, { chatId, msg });
-  const reply = formatBrainResponse(rawReply);
+    // Si el usuario pidió audio o podcast, solicitamos estilo correspondiente al brain y retornamos
+    const wantsAudio = /\baudio\b/i.test(text || '');
+    const wantsPodcast = /\bpodcast\b/i.test(text || '');
+    if (wantsAudio || wantsPodcast) {
+      const style = wantsPodcast ? 'podcast' : 'audio';
+      const rawAudioReply = await generateResponse(text, { chatId, msg, style });
+      const parsedAudio = safeParseJson(rawAudioReply);
+      const replyAudioText = formatBrainResponse(parsedAudio || rawAudioReply);
 
-  // Limpiar indicador de typing
-  if (typingInterval) clearInterval(typingInterval);
+      // Limpiar indicador de typing antes de subir audio
+      if (typingInterval) clearInterval(typingInterval);
 
-  // Enviar la respuesta formateada en texto plano (sin parse_mode)
-  await bot.sendMessage(chatId, reply);
+      // Si hay URL pública, enviamos el audio
+      const audioUrl = parsedAudio?.audio?.url || parsedAudio?.audio?.publicUrl || parsedAudio?.audioUrl;
+      if (audioUrl) {
+        try {
+          await bot.sendChatAction(chatId, 'upload_audio');
+        } catch {}
+        await bot.sendAudio(chatId, audioUrl, { caption: replyAudioText });
+        return;
+      }
+
+      // Fallback a texto si no llegó URL
+      await bot.sendMessage(chatId, replyAudioText);
+      return;
+    }
+
+    // Caso texto normal
+    const rawReply = await generateResponse(text, { chatId, msg });
+    const reply = formatBrainResponse(rawReply);
+
+    // Limpiar indicador de typing
+    if (typingInterval) clearInterval(typingInterval);
+
+    // Enviar la respuesta formateada en texto plano (sin parse_mode)
+    await bot.sendMessage(chatId, reply);
     return;
   } catch (err) {
     if (typingInterval) clearInterval(typingInterval);
@@ -113,7 +141,6 @@ async function handleVoiceMessage(chatId, voice, msg) {
 
     await bot.sendMessage(chatId, '🎧 He recibido tu nota de voz. La estoy procesando...');
 
-    // En este punto se podría descargar y transcribir usando un servicio externo (ej. Whisper/OpenAI)
     // Placeholder: respondemos con el link y una nota
     await bot.sendMessage(chatId, `Enlace al archivo de voz (temporal): ${fileLink}\n(Para transcribir, integra un servicio de ASR y procesa el archivo).`);
 
@@ -124,12 +151,22 @@ async function handleVoiceMessage(chatId, voice, msg) {
   }
 }
 
-// Integración con Capictive Brain (HTTP POST)
+function safeParseJson(maybeJson) {
+  if (typeof maybeJson !== 'string') return maybeJson;
+  const s = maybeJson.trim();
+  if (!s) return s;
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try { return JSON.parse(s); } catch { return maybeJson; }
+  }
+  return maybeJson;
+}
+
 async function generateResponse(userText, context) {
   const endpoint = process.env.CAPITIVE_BRAIN_URL || 'https://capictive-brain.diogofabricio17.workers.dev';
-  const timeoutMs = process.env.CAPITIVE_BRAIN_TIMEOUT_MS ? Number.parseInt(process.env.CAPITIVE_BRAIN_TIMEOUT_MS, 10) : 30000;
+  // Nota: removido timeout para permitir operaciones largas (p. ej., generación de audio)
 
   const payload = { query: userText };
+  if (context?.style) payload.style = context.style;
 
   try {
     const fetchPromise = fetch(endpoint, {
@@ -138,11 +175,8 @@ async function generateResponse(userText, context) {
       body: JSON.stringify(payload),
     });
 
-    // Timeout wrapper
-    const res = await Promise.race([
-      fetchPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
-    ]);
+    // Sin timeout: dejamos que el brain responda cuando esté listo (útil para generación de audio)
+    const res = await fetchPromise;
 
     if (!res?.ok) {
       let bodyText = '';
@@ -155,13 +189,14 @@ async function generateResponse(userText, context) {
       return `⚠️ Error consultando Capictive Brain: ${statusPart}. ${bodyText}`;
     }
 
+    // Intentar parsear como JSON; si no, devolver texto
+    const contentType = res.headers?.get?.('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try { return await res.json(); } catch {}
+    }
     const text = await res.text();
-    // El endpoint devuelve texto raw, lo retornamos tal cual
     return text && text.length > 0 ? text : 'Capictive Brain devolvió una respuesta vacía.';
   } catch (err) {
-    if (err && err.message === 'timeout') {
-      return '⏱️ La consulta tardó demasiado. Intenta de nuevo en un momento.';
-    }
     console.error('generateResponse error:', err);
     return '❌ Error interno al consultar Capictive Brain. Intenta de nuevo más tarde.';
   }

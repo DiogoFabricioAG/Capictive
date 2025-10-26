@@ -12,7 +12,25 @@
 	},
 	"ai": {
 		"binding": "AI"
+	},
+	"r2_buckets": [
+	{
+	  "binding": "MEDIA_R2",
+	  "bucket_name": "media-general"
 	}
+	],
+	"vars": {
+		"R2_PUBLIC_BASE_URL": "https://pub-d080c9e6f19a459ca925c3351abec237.r2.dev",
+
+		// Prefijo donde guardamos los audios (lo usa el Worker al subir: Audios/<archivo>.mp3)
+		"R2_PREFIX": "Audios",
+
+		// Voz por defecto para TTS si no envías voiceId en el body
+		"ELEVENLABS_VOICE_ID": "YKUjKbMlejgvkOZlnnvt",
+
+		"ELEVENLABS_API_KEY": "sk_739c77c5f350c8786be579470314811bc1f3b5acdfad6910"
+	}
+  
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
